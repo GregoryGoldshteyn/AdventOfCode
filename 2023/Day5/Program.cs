@@ -10,6 +10,10 @@ namespace Day5
         public long Destination { get; init; }
         public long Range { get; init; }
 
+        // These are useful for working with Mappings as ranges
+        public long SourceEnd { get { return Source + this.Range; } }
+        public long Displacement { get { return Destination - Source; } }
+
         public Mapping(string mappingEntry)
         {
             string[] mappingInfo = mappingEntry.Trim().Split(" ");
@@ -20,16 +24,16 @@ namespace Day5
 
         public override string ToString()
         {
-            return string.Format("source: {0}, destination {1}, range {2}", Source, Destination, Range);
+            return string.Format("source: {0}, sourceEnd:{1}, destination {2}, range {3}", Source, SourceEnd, Destination, Range);
         }
     }
 
     public readonly struct Map
     {
-        public List<Mapping> mappings { get; init; }
+        public SortedSet<Mapping> mappings { get; init; }
         public Map(string mapEntry)
         {
-            mappings = new List<Mapping>();
+            mappings = new SortedSet<Mapping>(new MappingComparer());
             string[] mappingsString = mapEntry.Trim().Split("\r\n");
             foreach (string mapping in mappingsString)
             {
@@ -74,7 +78,25 @@ namespace Day5
         }
     }
 
-    public class LongRangeComparer() {}
+    public class LongRangeComparer : IComparer<LongRange>
+    {
+        public int Compare(LongRange x, LongRange y) 
+        {
+            if(x.Start < y.Start) return -1;
+            if(x.Start > y.Start) return 1;
+            return 0;
+        }
+    }
+
+    public class MappingComparer : IComparer<Mapping>
+    {
+        public int Compare(Mapping x, Mapping y)
+        {
+            if (x.Source < y.Source) return -1;
+            if (x.Source > y.Source) return 1;
+            return 0;
+        }
+    }
 
     public static class Program
     {
@@ -84,7 +106,7 @@ namespace Day5
         private static List<long> candidateSeeds = new List<long>();
         private static List<Map> maps = new List<Map>();
 
-        private static List<LongRange> seedRanges = new List<LongRange>();
+        private static SortedSet<LongRange> seedRanges = new SortedSet<LongRange>(new LongRangeComparer());
 
         static void populateMaps(List<Map> maps, string mapString)
         {
@@ -96,7 +118,7 @@ namespace Day5
             }
         }
 
-        static void populateSeedsForPart1(List<long> seeds, string seedString)
+        static void populateSeeds(List<long> seeds, string seedString)
         {
             string[] seedArr = seedString.Split(" ");
             foreach (string seed in seedArr)
@@ -104,12 +126,12 @@ namespace Day5
                 seeds.Add(long.Parse(seed));
             }
         }
-        static void populateSeedsForPart2(List<LongRange> seedRanges, string seedString)
+        static void populateSeedRanges(SortedSet<LongRange> seedRanges, string seedString)
         {
             string[] seedArr = seedString.Split(" ");
             for(int i = 0; i < seedArr.Length; i+=2) 
             {
-                seedRanges.Add(new LongRange(seedArr[i], seedArr[i+1]));
+                seedRanges.Add(new LongRange(seedArr[i], seedArr[i + 1]));
             }
         }
 
@@ -137,12 +159,12 @@ namespace Day5
                         continue;
                     }
                     
-                    if(source >= mapping.Source + mapping.Range)
+                    if(source >= mapping.SourceEnd)
                     {
                         continue;
                     }
                     
-                    destinations.Add(source - mapping.Source + mapping.Destination);
+                    destinations.Add(source + mapping.Displacement);
                     mappingsFound += 1;
                 }
 
@@ -155,11 +177,97 @@ namespace Day5
             return destinations;
         }
 
+        private static bool applyMappingToRange(SortedSet<LongRange> currentSeedRanges, SortedSet<LongRange> nextSeedRanges, Mapping mapping, LongRange seedRange)
+        {
+            // Two NOPs. If the seed range is before or after the mapping
+            if(seedRange.End <= mapping.Source)
+            {
+                //Console.WriteLine(String.Format("{0} is before {1}. Skipping", seedRange, mapping));
+                return false;
+            }
+            if(seedRange.Start >= mapping.SourceEnd) 
+            {
+                //Console.WriteLine(String.Format("{0} is after {1}. Skipping", seedRange, mapping));
+                return false;
+            }
+
+            // In this case, some of the seed range extends past the end of the mapping
+            // A new range must be added to the current seeds, since it might intersect another mapping
+            if(seedRange.End > mapping.SourceEnd)
+            {
+                LongRange newPostRange = new LongRange(mapping.SourceEnd, seedRange.End);
+                //Console.WriteLine(String.Format("{0} has some seeds after {1}. Adding new post range {2}", seedRange, mapping, newPostRange));
+                currentSeedRanges.Add(newPostRange);
+            }
+            // In this case, some of the seed range exists before the start of the mapping
+            // A new range is added to the next seeds
+            if(seedRange.Start < mapping.Source)
+            {
+                LongRange newPreRange = new LongRange(seedRange.Start, mapping.Source);
+                //Console.WriteLine(String.Format("{0} has some seeds before {1}. Adding new pre range {2}", seedRange, mapping, newPreRange));
+                nextSeedRanges.Add(newPreRange);
+            }
+            // The part of the range inside the mapping is now displaced by the difference between the source and destination
+            // It's added to the next seed ranges, since its already been mapped
+
+            long startPoint = Math.Max(seedRange.Start, mapping.Source);
+            long endPoint = Math.Min(seedRange.End, mapping.SourceEnd);
+
+            LongRange displacedRange = new LongRange(startPoint + mapping.Displacement, endPoint + mapping.Displacement);
+            //Console.WriteLine(String.Format("{0} has some seeds inside {1}. The new range after displacement ({3}) looks like {2}", seedRange, mapping, displacedRange, mapping.Displacement));
+            nextSeedRanges.Add(displacedRange);
+
+            return true;
+        }
+
+        private static SortedSet<LongRange> applyAllMappingsInMap(SortedSet<LongRange> seedRange, Map map)
+        {
+            SortedSet<LongRange> nextRange = new SortedSet<LongRange>(new LongRangeComparer());
+
+            for(int i = 0; i < seedRange.Count; i+=1)
+            {
+                Console.WriteLine(String.Format("---- Checking seed {0}", seedRange.ElementAt(i)));
+                foreach(Mapping mapping in map.mappings)
+                {
+                    if(applyMappingToRange(seedRange, nextRange, mapping, seedRange.ElementAt(i)))
+                    {
+                        seedRange.Remove(seedRange.ElementAt(i));
+                    }
+                }
+            }
+
+            foreach(LongRange range in seedRange)
+            {
+                nextRange.Add(range);
+            }
+
+            printRangesAsBars(nextRange);
+
+            return nextRange;
+        }
+
+        private static long getMinLocation()
+        {
+            SortedSet<LongRange> locationRanges = new(seedRanges, new LongRangeComparer());
+            
+            foreach(Map map in maps)
+            {
+                locationRanges = applyAllMappingsInMap(locationRanges, map);
+            }
+
+            foreach(LongRange range in locationRanges)
+            {
+                Console.WriteLine(range);
+            }
+
+            return locationRanges.Min.Start;
+        }
+
         private static void part1()
         {
             long minValue;
 
-            populateSeedsForPart1(candidateSeeds, seedString);
+            populateSeeds(candidateSeeds, seedString);
             populateMaps(maps, mapString);
 
             foreach(Map map in maps)
@@ -181,10 +289,45 @@ namespace Day5
             Console.WriteLine(minValue);
         }
 
+        private static string getSeedRangeAsBar(LongRange range)
+        {
+            string outStr = "";
+            for(long i = 0; i < 237; i+=1)
+            {
+                if(range.Start / 18200000 > i || range.End / 18200000 < i)
+                {
+                    outStr += " ";
+                }
+                else
+                {
+                    outStr += "-";
+                }
+            }
+
+            return outStr;
+        }
+
+        private static void printRangesAsBars(IEnumerable<LongRange> ranges)
+        {
+            foreach(LongRange range in ranges)
+            {
+                Console.WriteLine(getSeedRangeAsBar(range));
+            }
+
+            for(int i = 0; i < 59; i += 1)
+            {
+                Console.Write("---+");
+            }
+
+            Console.WriteLine();
+        }
+
         private static void part2()
         {
-            populateSeedsForPart2(seedRanges, seedString);
+            populateSeedRanges(seedRanges, seedString);
             populateMaps(maps, mapString);
+
+            Console.WriteLine(getMinLocation());
         }
 
         static void Main()
