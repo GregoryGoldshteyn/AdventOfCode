@@ -224,15 +224,59 @@ namespace Day5
         {
             SortedSet<LongRange> nextRange = new SortedSet<LongRange>(new LongRangeComparer());
 
+            int seedIndex = 0, mappingIndex = 0;
+
+            while(seedIndex < seedRange.Count && mappingIndex < map.mappings.Count)
+            {
+                // Seeds are before the mapping. They "fall through" to the next iteration
+                if(seedRange.ElementAt(seedIndex).End <= map.mappings.ElementAt(mappingIndex).Source)
+                {
+                    nextRange.Add(seedRange.ElementAt(seedIndex));
+                    seedIndex += 1;
+                    continue;
+                }
+
+                // Seeds are after the mapping. Look at the next mapping
+                if (seedRange.ElementAt(seedIndex).Start >= map.mappings.ElementAt(mappingIndex).SourceEnd)
+                {
+                    mappingIndex += 1;
+                    continue;
+                }
+
+                // Part of the seeds are before the mapping. They fall through to the next iteration
+                if (seedRange.ElementAt(seedIndex).Start < map.mappings.ElementAt(mappingIndex).Source)
+                {
+                    nextRange.Add(new LongRange(seedRange.ElementAt(seedIndex).Start, map.mappings.ElementAt(mappingIndex).Source));
+                }
+
+                // Part of the seeds are after the mapping. We need to check if they are affected, so they ggo back into the current iteration
+                if (seedRange.ElementAt(seedIndex).End > map.mappings.ElementAt(mappingIndex).SourceEnd)
+                {
+                    seedRange.Add(new LongRange(map.mappings.ElementAt(mappingIndex).SourceEnd, seedRange.ElementAt(seedIndex).End));
+                }
+
+                // Part of the seeds are in the mapping. They get displaced in the next iteration
+                nextRange.Add(new LongRange(
+                    Math.Max(seedRange.ElementAt(seedIndex).Start, map.mappings.ElementAt(mappingIndex).Source) + map.mappings.ElementAt(mappingIndex).Displacement,
+                    Math.Min(seedRange.ElementAt(seedIndex).End, map.mappings.ElementAt(mappingIndex).SourceEnd) + map.mappings.ElementAt(mappingIndex).Displacement
+                    )
+                );
+
+                seedIndex += 1;
+            }
+
+            while(seedIndex < seedRange.Count )
+            {
+                nextRange.Add(seedRange.ElementAt(seedIndex));
+                seedIndex += 1;
+            }
+            /*
             for(int i = 0; i < seedRange.Count; i+=1)
             {
                 Console.WriteLine(String.Format("---- Checking seed {0}", seedRange.ElementAt(i)));
                 foreach(Mapping mapping in map.mappings)
                 {
-                    if(applyMappingToRange(seedRange, nextRange, mapping, seedRange.ElementAt(i)))
-                    {
-                        seedRange.Remove(seedRange.ElementAt(i));
-                    }
+                    applyMappingToRange(seedRange, nextRange, mapping, seedRange.ElementAt(i));
                 }
             }
 
@@ -240,6 +284,7 @@ namespace Day5
             {
                 nextRange.Add(range);
             }
+            */
 
             printRangesAsBars(nextRange);
 
